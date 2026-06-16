@@ -429,6 +429,6 @@ END
 ---
 *Built for DAIS 2026 Hackathon — Track 1*
 
-**Team:** Sonal Jain
+**Team:** Jain
 
 **App:** [facility-trust-desk-7474649205602894.aws.databricksapps.com](https://facility-trust-desk-7474649205602894.aws.databricksapps.com)
