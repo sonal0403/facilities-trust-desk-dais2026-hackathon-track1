@@ -1,0 +1,106 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Facility Trust Desk</title>
+    <link rel="stylesheet" href="/static/style.css">
+</head>
+<body>
+
+    <!-- Header with search -->
+    <div class="header">
+        <div class="header-top">
+            <div class="logo">Facility <span>Trust Desk</span></div>
+            <div class="user-info">Planner View</div>
+        </div>
+        <div class="search-container">
+            <span class="search-icon">&#128269;</span>
+            <input type="text" class="search-input" placeholder="Search facility, capability, or region..." id="searchInput" autocomplete="off">
+            <div class="search-hint">Type 2+ characters for suggestions</div>
+            <div class="autocomplete-dropdown" id="acDropdown"></div>
+        </div>
+    </div>
+
+    <!-- Cache loading banner -->
+    <div id="cacheStatus" class="cache-banner">Loading metadata for fast search...</div>
+
+    <!-- Main content -->
+    <div class="main">
+
+        <!-- Landing: Netflix rows -->
+        <div id="landingView">
+            <div class="hero-section" id="heroSection"></div>
+
+            <div class="scroll-row">
+                <div class="scroll-row-title">Regions</div>
+                <div class="scroll-row-container" id="rowRegions">
+                    <div class="loading">Loading...</div>
+                </div>
+            </div>
+
+            <div class="scroll-row">
+                <div class="scroll-row-title">Capabilities</div>
+                <div class="scroll-row-container" id="rowCapabilities">
+                    <div class="loading">Loading...</div>
+                </div>
+            </div>
+
+            <div class="scroll-row">
+                <div class="scroll-row-title">Top Facilities</div>
+                <div class="scroll-row-container" id="rowTopFacilities">
+                    <div class="loading">Loading...</div>
+                </div>
+            </div>
+
+            <div class="scroll-row">
+                <div class="scroll-row-title">Strong Evidence</div>
+                <div class="scroll-row-container" id="rowStrongEvidence">
+                    <div class="loading">Loading...</div>
+                </div>
+            </div>
+
+            <div class="scroll-row">
+                <div class="scroll-row-title">Needs Review</div>
+                <div class="scroll-row-container" id="rowNeedsReview">
+                    <div class="loading">Loading...</div>
+                </div>
+            </div>
+        </div>
+
+        <!-- Facility list view -->
+        <div class="facility-view" id="facilityView">
+            <div class="view-header">
+                <h2 id="viewTitle">Facilities</h2>
+                <button class="back-btn" onclick="showLanding()">&larr; Back</button>
+            </div>
+            <div class="cross-filter" id="crossFilter" style="display:none;">
+                <input type="text" class="cross-filter-input" id="crossFilterInput" placeholder="Filter by..." autocomplete="off">
+                <div class="cross-filter-dropdown" id="crossFilterDropdown"></div>
+            </div>
+            <div class="filter-pills" id="filterPills"></div>
+            <div class="facility-list" id="facilityList"></div>
+            <div class="load-more-container" id="loadMoreContainer" style="display:none;">
+                <button class="load-more-btn" id="loadMoreBtn">Load More</button>
+            </div>
+        </div>
+    </div>
+
+    <!-- Unified Facility Popup -->
+    <div class="popup-overlay" id="facilityPopup">
+        <div class="popup">
+            <div class="popup-header">
+                <div>
+                    <div class="popup-title" id="popupTitle"></div>
+                    <div class="popup-subtitle" id="popupSubtitle"></div>
+                </div>
+                <button class="popup-close" onclick="closeFacilityPopup()">&times;</button>
+            </div>
+            <div class="popup-tabs" id="popupTabs"></div>
+            <div class="popup-body" id="popupBody"></div>
+        </div>
+    </div>
+
+    <script src="/static/app.js"></script>
+</body>
+</html>
