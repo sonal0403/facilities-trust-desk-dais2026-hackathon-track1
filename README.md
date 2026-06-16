@@ -2,20 +2,68 @@
 
 ---
 
-## 1. Inspiration
+### Team
 
-> *"Healthcare facilities claim all kinds of capabilities — but how do you know what's genuinely backed by evidence vs. just noise in the data?"*
-
-- **10,000 facilities** self-report capabilities — no verification layer exists today
-- Planners need to evaluate: how strongly is each claim backed by evidence across the data?
-- **15 healthcare capabilities × 10k facilities = 150,000 trust decisions** to make
-- Manual verification is impossible at this scale
-
-**Our goal:** Build a trust scoring system that counts evidence signals across multiple data fields, lets planners browse and evaluate claims at scale, and gives them the power to override when they know better.
-
-**Future enhancement:** Treat specific quantitative claims (e.g., "22-bed ICU") as a strong signal in itself — currently it's counted like any other keyword hit.
+| Name | Role | Company |
+|------|------|---------|
+| **Sonal Jain** | Data Engineering Manager, AdTech | Comcast (Cable/Telecommunication) |
+| **Saket Jain** | Principal Data Engineer, Data Platform | DriveWealth (FinTech) |
 
 ---
+
+## Table of Contents
+
+- [1. Inspiration](#1-inspiration)
+- [2. What It Does](#2-what-it-does)
+- [3. How We Built It](#3-how-we-built-it)
+  - [Our Multi-AI Approach](#our-multi-ai-approach)
+  - [Act 1: The Capability Map](#act-1-the-capability-map-most-important-piece)
+  - [Act 2: The Scoring Engine](#act-2-the-scoring-engine)
+  - [Act 3: Front-end Stack](#act-3-front-end-stack)
+  - [Act 4: State Images](#act-4-state-images)
+  - [Act 5: Override & Audit Flow](#act-5-override--audit-flow)
+- [4. Challenges We Ran Into](#4-challenges-we-ran-into)
+- [5. Accomplishments](#5-accomplishments)
+- [6. What We Learned](#6-what-we-learned)
+- [7. What's Next](#7-whats-next)
+- [8. Technical Reference](#8-technical-reference)
+  - [Development Workflow — Multi-Modal AI Approach](#development-workflow--multi-modal-ai-approach)
+  - [Data Architecture](#data-architecture)
+  - [API Reference](#api-reference)
+  - [Ranking Logic](#ranking-logic--why-things-appear-where-they-do)
+  - [Image Refresh Procedure](#image-refresh-procedure)
+
+---
+
+## 1. Inspiration
+
+> *"A facility claims it has an ICU. But does it actually have ventilators? Does it perform mechanical ventilation? Does it have critical care specialists on staff? Or is ICU just a word in a list?"*
+
+Every facility in our dataset has a **capability** field — a JSON array of things they say they can do: `["ICU", "Maternity", "Emergency"]`. These are their **claims**.
+
+But a claim alone doesn't tell you how real it is. The same dataset also has:
+- **equipment** — what physical devices they have
+- **procedure** — what medical procedures they perform
+- **specialties** — what registered medical specialties they hold
+- **description** — free-text about the facility
+
+**The question:** Does the rest of the data back up what the facility claims?
+
+| What we have | What it means |
+|-------------|---------------|
+| Facility claims "ICU" in capability field | That's the **claim** |
+| Equipment lists "ventilator", "cardiac monitor" | That's **evidence** supporting the claim |
+| Procedures include "mechanical ventilation" | More **evidence** |
+| Specialties include `criticalCareMedicine` | Even more **evidence** |
+
+**Our approach:** Evaluate each claim by checking how many other categories corroborate it. More corroboration = higher trust.
+
+- **10,000 facilities** × **15 capabilities** = **150,000 trust decisions** to make
+- Manual verification is impossible at this scale
+- **Our goal:** Build an app that evaluates facility claims by measuring corroborating evidence, lets planners browse and assess trust at scale, and gives them the power to override when they know better.
+
+---
+
 ## 2. What It Does
 
 > *Think Netflix — but for healthcare facility trust.*
@@ -32,21 +80,56 @@
 **Live app:** [facility-trust-desk-7474649205602894.aws.databricksapps.com](https://facility-trust-desk-7474649205602894.aws.databricksapps.com)
 
 ---
+
 ## 3. How We Built It
 
-### Act 1: The Capability Map (most important piece)
+### Our Multi-AI Approach
 
-> *We had raw unstructured text. Our team fed it to Genie and asked: "what capabilities are described here?" Genie produced a global capability map — 15 capabilities, each with keyword dictionaries by field. This became the foundation.*
+We used a **multi-modal AI approach** combining Databricks AI Gateway and Genie for initial analysis, then Claude Code with Databricks MCP Server for iterative development:
 
 ```
-┌──────────────────────┐       ┌─────────────────────┐       ┌────────────────────────┐       ┌──────────────────┐
-│  Raw facility text   │ ────▶ │   Genie analysis    │ ────▶ │  Capability Map (JSON) │ ────▶ │  Scoring Engine  │
-│  (5 unstructured     │       │   "what capabilities│       │  15 capabilities ×     │       │  config — no LLM │
-│   fields per row)    │       │    are here?"       │       │  5 fields × N keywords │       │  needed at runtime│
-└──────────────────────┘       └─────────────────────┘       └────────────────────────┘       └──────────────────┘
+┌─────────────────────────────────────────────────────────────────────────────────────┐
+│                         MULTI-AI DEVELOPMENT APPROACH                               │
+│                                                                                     │
+│  Phase 1: Discovery & Foundation          Phase 2: Build & Deploy                   │
+│  ┌───────────────────────────────┐        ┌────────────────────────────────────┐    │
+│  │  Databricks Genie             │        │  Claude Code (IntelliJ Terminal)   │    │
+│  │  + AI Gateway                 │        │  + Databricks MCP Server           │    │
+│  │                               │        │  + Databricks AI Gateway           │    │
+│  │  • Explore raw data           │        │                                    │    │
+│  │  • Identify 15 capabilities   │        │  • Expand keyword map per category │    │
+│  │  • Generate seed keyword list │        │  • Build scoring engine            │    │
+│  │  • Understand field structure │        │  • Build FastAPI app + UI          │    │
+│  └───────────────────────────────┘        │  • Deploy & iterate                │    │
+│              │                            └────────────────────────────────────┘    │
+│              ▼                                            │                         │
+│     Seed list (15 caps × flat keywords)                   ▼                         │
+│              │                             Full 5-category keyword map              │
+│              └──────────────────────────── + Working app + Live deployment          │
+└─────────────────────────────────────────────────────────────────────────────────────┘
 ```
 
-**Sample from the capability map:**
+### Act 1: Building the Data Foundation | The Capability Map (most important piece)
+
+**How we built the map — step by step:**
+
+1. **Genie explored the raw data** — our team fed the unstructured facility text to Genie and asked: "what healthcare capabilities are described across these 10k records?" Genie identified 15 distinct capability categories.
+
+2. **Genie produced a seed keyword list** — for each capability, a flat array of core keywords that signal its presence:
+   ```
+   "ICU": ["icu", "intensive care", "critical care", "intensive care unit", ...]
+   "NICU": ["nicu", "neonatal", "newborn intensive care", ...]
+   "Maternity": ["maternity", "obstetrics", "labor", "delivery", ...]
+   ```
+
+3. **Claude Code expanded per category** — using Databricks MCP Server to query the actual data, Claude expanded the flat list into a structured 5-category map:
+   - Distributed seed keywords to the correct categories (e.g., "ventilator" → equipment)
+   - Added field-specific terms by analyzing what actually appears in each field (equipment names, procedure terms, specialty codes)
+   - Added reasonable synonyms and variations as a "wishlist" — if they appear in the data, they'll match; if not, no harm
+
+4. **Keywords are search terms, not extracted phrases** — the map is a collection of substring patterns, not an inventory of exact values found in the data. Keyword `"neonatal"` will catch `"Neonatal Intensive Care"`, `"neonatal resuscitation"`, etc. Some keywords may have zero matches across all facilities — they're there for completeness.
+
+**The final map structure (15 capabilities × 5 categories × N keywords each):**
 
 | Capability | capability field keywords | equipment field | procedure field | specialties field |
 |-----------|--------------------------|-----------------|-----------------|-------------------|
@@ -99,13 +182,30 @@ Each capability in our map has keywords organized into **5 categories** (fields 
 **Trust Level Decision Table:**
 
 | Trust Level | Path 1: Category Spread | Path 2: Sheer Volume | Intuition |
-|-------------|------------------------|---------------------|-----------||
+|-------------|------------------------|---------------------|-----------|
 | **Strong** | 3+ categories matched | OR 5+ total hits (even in 1 category) | Either confirmed across multiple independent sources, OR overwhelming keyword density in the data |
 | **Partial** | 2+ categories matched | OR 3+ total hits (even in 1 category) | Either evidence in 2 categories, OR enough repetition to suggest real capability |
 | **Weak** | 1 category with a hit | (fewer than 3 total hits) | Mentioned somewhere but not strongly backed |
 | **No Claim** | — | 0 matches | Capability not found anywhere in the facility's data |
 
 *Additionally: a quantitative claim (e.g., "22-bed ICU") + 2+ categories → Strong (lowers the spread threshold by 1).*
+
+**Quantitative detection code:**
+```python
+def _has_quantitative_claim(citations):
+    quant_pattern = re.compile(r'\d+[\s-]*(bed|unit|theatre|ot |ventilator|machine|doctor)', re.IGNORECASE)
+    for cite in citations:
+        if quant_pattern.search(cite["text"]):
+            return True
+    return False
+
+def _determine_trust_level(fields_matched, match_count, has_quant):
+    num_fields = len(fields_matched)
+    if num_fields >= 3 or match_count >= 5 or (has_quant and num_fields >= 2):
+        return "strong_evidence"
+    ...
+```
+*The regex detects patterns like "22-bed", "5 ventilator", "10 unit" in citation text. If found AND 2+ categories matched → promotes to Strong.*
 
 **Worked example — NICU scoring for a facility:**
 
@@ -126,16 +226,6 @@ Each capability in our map has keywords organized into **5 categories** (fields 
 > Both paths are valid. Category spread means independent corroboration. Keyword density means the data is rich with references even if concentrated in one area.
 
 > **Future enhancement:** Treat specific quantitative claims (e.g., "22-bed ICU") as a strong signal in itself — currently counted like any other keyword hit.
-
-**Example SQL to see scoring in action:**
-```sql
--- See the scoring in action for a real facility
-SELECT facility_id, capability, trust_level, match_count, fields_matched, evidence_citations
-FROM workspace.default.facility_trust_scores
-WHERE trust_level = 'strong_evidence'
-ORDER BY match_count DESC
-LIMIT 5
-```
 
 ### Act 3: Front-end Stack
 
@@ -188,38 +278,20 @@ Planner edits citation pills in the UI
 
 This means overrides are **immediately reflected** everywhere in the app AND **fully auditable**.
 
-**Example SQL to view audit trail:**
-```sql
--- View recent overrides (audit trail)
-SELECT id, facility_id, capability_scored, old_trust_level, new_trust_level, note, confirmed_at
-FROM workspace.default.user_overrides
-ORDER BY confirmed_at DESC
-LIMIT 10
-```
-
 ---
+
 ## 4. Challenges We Ran Into
 
 | Challenge | What We Found | How We Solved It |
-|-----------|--------------|------------------|
+|-----------|--------------|-----------------|
 | **Messy state field** | `address_stateOrRegion` contains cities, geocodes (`12.9716,77.5946`), JSON fragments | Filter: `LENGTH < 40`, exclude `{` and `[` prefixes |
 | **Duplicate scores** | Multiple rows per facility×capability in the scores table | `ROW_NUMBER() OVER (PARTITION BY capability ORDER BY match_count DESC)` — keep the best |
 | **App container isolation** | Databricks App container can't access `/Workspace/` filesystem paths at runtime | Images stored as binary blobs in a Delta table, served via SQL query instead of file reads |
 | **Performance at scale** | 10k facilities × 15 capabilities = 151k score rows; cold warehouse queries take seconds | In-memory cache on app startup (capabilities, regions, facility names) for instant search/autocomplete |
 | **Image name mismatch** | DB: "Jammu And Kashmir" vs file: "Jammu_Kashmir_1.jpg" | Normalize to alpha-only lowercase + fuzzy `startsWith` comparison |
 
-**Example of messy state data:**
-```sql
--- Example of the messy state data we had to handle
-SELECT address_stateOrRegion, COUNT(*) as cnt
-FROM databricks_virtue_foundation_dataset_dais_2026.virtue_foundation_dataset.facilities
-WHERE address_stateOrRegion IS NOT NULL
-GROUP BY address_stateOrRegion
-ORDER BY cnt DESC
-LIMIT 20
-```
-
 ---
+
 ## 5. Accomplishments
 
 - **Zero-LLM scoring** — runs in milliseconds, no API cost, fully deterministic
@@ -231,6 +303,7 @@ LIMIT 20
 - **Genie-powered foundation** — the capability map was generated from raw data, not hand-crafted
 
 ---
+
 ## 6. What We Learned
 
 - **Keyword scoring is surprisingly effective** — when the capability map is well-curated (Genie produced a great initial map from raw text)
@@ -240,6 +313,7 @@ LIMIT 20
 - **Caching makes everything feel instant** — startup cache for metadata eliminates repeated SQL for search/autocomplete
 
 ---
+
 ## 7. What's Next
 
 | Enhancement | Impact |
@@ -248,40 +322,61 @@ LIMIT 20
 | Quantitative claim weighting | "22-bed ICU" counts as a strong signal by itself |
 | Bulk override workflow | Approve/reject multiple facilities at once |
 | External verification | Cross-reference with government registry, accreditation databases |
-| Collaborative review | Assign facilities to specific planners, track review progress; requires authentication and authorization to manage user roles and permissions |
+| Collaborative review | Assign facilities to specific planners, track review progress |
 | Confidence scoring | Weight different signal types differently (equipment > description mention) |
 
 ---
+
 ## 8. Technical Reference
 
-### Development Workflow
+### Development Workflow — Multi-Modal AI Approach
 
-We used two AI-powered tools in tandem to build this app:
+We used **Databricks AI Gateway + Genie** for data discovery, then **Claude Code + Databricks MCP Server** for iterative development — a true multi-AI approach:
 
 ```
-┌────────────────────────────────────────────────────────────────────────────────┐
-│                        DEVELOPMENT WORKFLOW                                     │
-│                                                                                 │
-│  ┌─────────────────────┐         ┌──────────────────────────────────────────┐  │
-│  │   Genie (AI Code)   │         │   Claude Code (IntelliJ Terminal)         │  │
-│  │                     │         │                                           │  │
-│  │  • Analyzed raw     │         │  • Connected to Databricks workspace      │  │
-│  │    facility data    │         │    via Databricks MCP Server              │  │
-│  │  • Built the 15-    │         │  • Iterated on app code (FastAPI + JS)    │  │
-│  │    capability map   │         │  • Deployed app directly from terminal    │  │
-│  │  • Foundational     │         │  • Managed tables, queries, debugging     │  │
-│  │    data analysis    │         │  • End-to-end development loop            │  │
-│  └─────────────────────┘         └──────────────────────────────────────────┘  │
-│         │                                        │                              │
-│         ▼                                        ▼                              │
-│   Capability Map JSON                  Working App + Deployment                  │
-│   (keywords per field)                 (code → workspace → live app)             │
-└────────────────────────────────────────────────────────────────────────────────┘
+┌──────────────────────────────────────────────────────────────────────────────────────┐
+│                     MULTI-MODAL AI DEVELOPMENT WORKFLOW                               │
+│                                                                                       │
+│  Phase 1: Discovery                      Phase 2: Development                         │
+│  ┌──────────────────────────────┐        ┌───────────────────────────────────────┐   │
+│  │  Databricks AI Gateway       │        │  Claude Code (IntelliJ IDE Terminal)   │   │
+│  │  + Genie                     │        │  + Databricks MCP Server               │   │
+│  │                              │        │  + Databricks AI Gateway               │   │
+│  │  • Explore 10k facility rows │        │                                        │   │
+│  │  • Identify 15 capabilities  │        │  • Expand seed → 5-category map        │   │
+│  │  • Generate seed keywords    │        │  • Build scoring engine (Python)        │   │
+│  │  • Understand field schemas  │        │  • Build FastAPI + Netflix UI           │   │
+│  │                              │        │  • Run SQL, manage tables, debug        │   │
+│  └──────────────────────────────┘        │  • Deploy app from terminal             │   │
+│              │                            │  • Full iteration loop — never          │   │
+│              ▼                            │    left the terminal                    │   │
+│     Seed keyword list                     └───────────────────────────────────────┘   │
+│     (15 capabilities × flat arrays)                       │                           │
+│              │                                            ▼                           │
+│              └──────────────────────▶  Live app + scoring engine + audit system       │
+└──────────────────────────────────────────────────────────────────────────────────────┘
 ```
 
-**Step 1 — Genie Code:** Our team used Genie to explore the raw unstructured facility data, understand patterns across 10k rows, and generate the global capability map (15 capabilities × 5 categories × N keywords). This was the foundational data work.
+**Phase 1 — Genie + AI Gateway (Foundation):**
+- Our team used Genie to explore the raw unstructured data across 10k facility records
+- Genie identified 15 healthcare capabilities and generated a seed keyword list for each
+- This was the foundational data analysis — understanding what's in the data before building anything
 
-**Step 2 — Claude Code:** From the IntelliJ IDE terminal, we connected Claude Code to our Databricks workspace using the **Databricks MCP Server**. This gave us the ability to iterate on code, run SQL, manage tables, upload files, and deploy the app — all in a single conversational loop without leaving the terminal.
+**Phase 2 — Claude Code + Databricks MCP Server (Build):**
+- From the IntelliJ IDE terminal, Claude Code connected to our Databricks workspace via the **Databricks MCP Server**
+- This gave us the ability to: run SQL queries, create/modify tables, upload code, deploy the app, and debug — all in a single conversational loop
+- Claude expanded the seed keyword list into a full 5-category map by querying actual data through the MCP connection
+- The entire app (scoring engine, FastAPI backend, Netflix UI, override system) was built and deployed iteratively without leaving the terminal
+
+**Key tools in the stack:**
+
+| Tool | Role |
+|------|------|
+| Databricks AI Gateway | LLM access layer for Genie and AI-powered analysis |
+| Genie | Natural language data exploration, generated seed capability map |
+| Claude Code | AI coding assistant — wrote all application code |
+| Databricks MCP Server | Connected Claude Code to workspace (SQL, tables, files, deploy) |
+| Databricks Apps | Hosted the final FastAPI application |
 
 ---
 
@@ -324,37 +419,24 @@ We used two AI-powered tools in tandem to build this app:
 └───────────────────────────────────────────────────────────────────┘
 ```
 
-**Table statistics:**
-```sql
--- Table stats
-SELECT 'facilities (source)' as table_name, COUNT(*) as row_count 
-FROM databricks_virtue_foundation_dataset_dais_2026.virtue_foundation_dataset.facilities
-UNION ALL
-SELECT 'facility_trust_scores', COUNT(*) FROM workspace.default.facility_trust_scores
-UNION ALL
-SELECT 'user_overrides', COUNT(*) FROM workspace.default.user_overrides
-UNION ALL
-SELECT 'state_images_data', COUNT(*) FROM workspace.default.state_images_data
-```
-
 ### API Reference
 
 | Endpoint | Method | Purpose |
-|----------|--------|---------|  
+|----------|--------|---------|
 | `/` | GET | Serve main UI (index.html) |
 | `/api/cache-status` | GET | Check if startup cache is ready |
 | `/api/capabilities` | GET | List 15 capabilities with facility counts |
 | `/api/regions` | GET | List all valid regions with facility counts |
 | `/api/hero-regions` | GET | Top 5 regions for hero carousel |
 | `/api/top-facilities?limit=` | GET | Facilities with highest total citation counts |
-| `/api/strong-evidence?limit=` | GET | Facilities scored as strong across most capabilities |
-| `/api/needs-review?limit=` | GET | Borderline cases (weak + 2+ matches) |
-| `/api/facilities?region=&capability=&name=` | GET | Cross-filter search (AND logic) |
-| `/api/facility/{id}` | GET | Full facility details + all 15 capability scores |
-| `/api/facility/{id}/rescore` | POST | Re-evaluate with edited texts, return before/after |
-| `/api/facility/{id}/confirm-override` | POST | Write audit + update live scores |
-| `/api/state-image/{state}` | GET | JPEG response (fuzzy match on state name) |
-| `/api/search-suggestions?q=` | GET | Autocomplete facility names (cached) |
+| `/api/strong-evidence?limit=` | GET | Facilities scored as strong evidence |
+| `/api/needs-review?limit=` | GET | Weak evidence with match_count ≥ 2 (borderline) |
+| `/api/facilities?capability=&region=&trust_level=&limit=&offset=` | GET | Filtered facility list with pagination |
+| `/api/facility/{id}?capability=` | GET | Full facility detail + all capability scores |
+| `/api/search?q=` | GET | Autocomplete across capabilities, regions, facilities |
+| `/api/state-image/{region}` | GET | Serve JPEG image from Delta table |
+| `/api/facility/{id}/rescore` | POST | Re-evaluate with edited texts → before/after |
+| `/api/facility/{id}/confirm-override` | POST | Write override to audit + update live scores |
 
 ### Ranking Logic — Why Things Appear Where They Do
 
@@ -366,20 +448,6 @@ SELECT 'state_images_data', COUNT(*) FROM workspace.default.state_images_data
 | Facility tagged "ICU" on its card | Either filtering by ICU, or ICU is its highest-scored capability |
 | Strong before Partial in facility list | `ORDER BY trust_priority` (strong=1, partial=2, weak=3, none=4) |
 | "Needs Review" row entries | `trust_level = 'weak_evidence' AND match_count >= 2` — borderline cases |
-
-**Example - Why Maharashtra is first:**
-```sql
--- Why Maharashtra is first: top regions by facility count
-SELECT address_stateOrRegion as region, COUNT(*) as facility_count
-FROM databricks_virtue_foundation_dataset_dais_2026.virtue_foundation_dataset.facilities
-WHERE address_stateOrRegion IS NOT NULL
-  AND LENGTH(address_stateOrRegion) < 40
-  AND address_stateOrRegion NOT LIKE '{%'
-  AND address_stateOrRegion NOT LIKE '[%'
-GROUP BY address_stateOrRegion
-ORDER BY facility_count DESC
-LIMIT 10
-```
 
 ### Image Refresh Procedure
 
@@ -398,36 +466,10 @@ The fuzzy matching handles inconsistencies like:
 - `"Maharashtra"` → normalized → `maharashtra` → matches file `Maharashtra_1.jpg` (normalized: `maharashtra`)
 - `"Jammu And Kashmir"` → normalized → `jammuandkashmir` → `startsWith` match with `jammukashmir`
 
-**Current state images:**
-```sql
--- Current state images in the table
-SELECT filename, LENGTH(content) as size_bytes
-FROM workspace.default.state_images_data
-ORDER BY filename
-```
-
 ---
 
-### Trust Level Distribution (live)
-
-```sql
--- How are the 150k scores distributed across trust levels?
-SELECT trust_level, COUNT(*) as score_count,
-       COUNT(DISTINCT facility_id) as facilities_affected,
-       ROUND(AVG(match_count), 1) as avg_match_count
-FROM workspace.default.facility_trust_scores
-GROUP BY trust_level
-ORDER BY CASE trust_level
-    WHEN 'strong_evidence' THEN 1
-    WHEN 'partial_evidence' THEN 2
-    WHEN 'weak_evidence' THEN 3
-    ELSE 4
-END
-```
-
----
 *Built for DAIS 2026 Hackathon — Track 1*
 
-**Team:** Jain
+**Team:** Sonal Jain, Saket Jain
 
 **App:** [facility-trust-desk-7474649205602894.aws.databricksapps.com](https://facility-trust-desk-7474649205602894.aws.databricksapps.com)
